@@ -1,5 +1,6 @@
 package com.sephp.mycarlauncher
 
+import android.annotation.SuppressLint
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -35,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.accompanist.drawablepainter.rememberDrawablePainter
 import com.sephp.mycarlauncher.ui.theme.MyCarLauncherTheme
 import java.text.SimpleDateFormat
 import java.util.*
@@ -407,20 +409,29 @@ fun AppItem(
             .padding(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // 应用图标占位
+        // 应用图标
         Box(
             modifier = Modifier
                 .size(56.dp)
                 .clip(RoundedCornerShape(12.dp))
-                .background(Color.DarkGray),
+                .background(Color.White),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = appInfo.label.take(1),
-                color = Color.White,
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold
-            )
+            appInfo.icon?.let { drawable ->
+                Image(
+                    painter = rememberDrawablePainter(drawable = drawable),
+                    contentDescription = appInfo.label,
+                    modifier = Modifier.size(48.dp)
+                )
+            } ?: run {
+                // 备用：显示首字母
+                Text(
+                    text = appInfo.label.take(1),
+                    color = Color.Black,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
         
         Spacer(modifier = Modifier.height(8.dp))
@@ -441,7 +452,8 @@ fun AppItem(
 // 应用信息数据类
 data class AppInfo(
     val label: String,
-    val packageName: String
+    val packageName: String,
+    val icon: Drawable? = null
 )
 
 // 获取已安装的应用列表
@@ -451,14 +463,21 @@ fun getInstalledApps(context: Context): List<AppInfo> {
         addCategory(Intent.CATEGORY_LAUNCHER)
     }
     
-    val apps = packageManager.queryIntentActivities(intent, 0)
-        .map { resolveInfo ->
-            AppInfo(
-                label = resolveInfo.loadLabel(packageManager).toString(),
-                packageName = resolveInfo.activityInfo.packageName
-            )
+    // 使用MATCH_ALL获取所有应用，包括禁用的
+    val apps = packageManager.queryIntentActivities(intent, PackageManager.MATCH_ALL)
+        .mapNotNull { resolveInfo ->
+            try {
+                val icon = resolveInfo.loadIcon(packageManager)
+                AppInfo(
+                    label = resolveInfo.loadLabel(packageManager).toString(),
+                    packageName = resolveInfo.activityInfo.packageName,
+                    icon = icon
+                )
+            } catch (e: Exception) {
+                null // 忽略无法加载的应用
+            }
         }
-        .sortedBy { it.label }
+        .sortedBy { it.label.lowercase() }
     
     return apps
 }
