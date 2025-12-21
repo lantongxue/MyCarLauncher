@@ -123,7 +123,9 @@ fun HomeScreen() {
             StatusBar(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(50.dp)
+                    //.padding(start = 12.dp, top = 12.dp, end = 12.dp, bottom = 6.dp)
+                    //.clip(RoundedCornerShape(12.dp))
+                    .height(30.dp)
             )
             
             // 主内容区域 - Main Content Area
@@ -134,7 +136,9 @@ fun HomeScreen() {
                 // Dock栏 - Dock Bar (Green Border)
                 DockBar(
                     modifier = Modifier
-                        .width(80.dp)
+                        //.padding(start = 12.dp, top = 6.dp, end = 6.dp, bottom = 12.dp)
+                        .width(56.dp)
+                        //.clip(RoundedCornerShape(12.dp))
                         .fillMaxHeight(),
                     onShowAppList = { showAppList = true },
                     onDockAppLongPress = { index ->
@@ -149,6 +153,7 @@ fun HomeScreen() {
                 ContentArea(
                     modifier = Modifier
                         .fillMaxSize()
+                        .padding(start = 6.dp, top = 6.dp, end = 12.dp, bottom = 12.dp)
                 )
             }
         }
@@ -189,10 +194,9 @@ fun StatusBar(modifier: Modifier = Modifier) {
     
     Box(
         modifier = modifier
-            .border(3.dp, Color.Red)
             .background(Color.Black.copy(alpha = 0.5f))
-            .padding(horizontal = 24.dp),
-        contentAlignment = Alignment.CenterStart
+            .padding(horizontal = 6.dp),
+        contentAlignment = Alignment.CenterStart,
     ) {
         // 时间和日期在一行显示
         Row(
@@ -207,7 +211,7 @@ fun StatusBar(modifier: Modifier = Modifier) {
             )
             Text(
                 text = currentTime.second,
-                color = Color.Gray,
+                color = Color.White,
                 fontSize = 16.sp
             )
         }
@@ -248,9 +252,8 @@ fun DockBar(
     
     Box(
         modifier = modifier
-            .border(3.dp, Color.Green)
             .background(blurBackground)
-            .padding(16.dp)
+            .padding(5.dp)
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),
@@ -262,8 +265,8 @@ fun DockBar(
                     .weight(1f)
                     .fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                contentPadding = PaddingValues(top = 8.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                //contentPadding = PaddingValues(top = 8.dp)
             ) {
                 items(5) { index ->
                     val app = dockApps[index]
@@ -283,10 +286,10 @@ fun DockBar(
             }
             
             // 固定在底部的所有应用按钮
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
             Box(
                 modifier = Modifier
-                    .size(48.dp)
+                    .size(40.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .clickable { onShowAppList() },
                 contentAlignment = Alignment.Center
@@ -294,7 +297,7 @@ fun DockBar(
                 Image(
                     painter = painterResource(id = R.drawable.ic_action_apps),
                     contentDescription = "All Apps",
-                    modifier = Modifier.size(32.dp),
+                    modifier = Modifier.size(24.dp),
                     colorFilter = ColorFilter.tint(iconColor)
                 )
             }
@@ -313,9 +316,9 @@ fun DockAppItem(
 ) {
     Box(
         modifier = Modifier
-            .size(48.dp)
+            .size(50.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(if (appInfo != null) Color.White else Color.Transparent)
+            .background(Color.Transparent)
             //.border(1.dp, iconColor, RoundedCornerShape(12.dp))
             .combinedClickable(
                 onClick = {
@@ -336,7 +339,7 @@ fun DockAppItem(
                 Image(
                     painter = rememberDrawablePainter(drawable = drawable),
                     contentDescription = appInfo.label,
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(48.dp)
                 )
             } ?: run {
                 Text(
@@ -351,7 +354,7 @@ fun DockAppItem(
             Text(
                 text = "+",
                 color = iconColor,
-                fontSize = 32.sp,
+                fontSize = 24.sp,
                 fontWeight = FontWeight.Bold
             )
         }
