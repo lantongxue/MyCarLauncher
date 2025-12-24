@@ -48,6 +48,7 @@ import com.google.accompanist.drawablepainter.rememberDrawablePainter
 import com.sephp.mycarlauncher.ui.theme.MyCarLauncherTheme
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.core.content.edit
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -56,9 +57,6 @@ class MainActivity : ComponentActivity() {
         // 设置全屏模式
         enableEdgeToEdge()
         setupFullscreen()
-        
-        // 检查并请求设置为默认launcher
-        //checkAndRequestDefaultLauncher()
         
         setContent {
             MyCarLauncherTheme {
@@ -80,30 +78,6 @@ class MainActivity : ComponentActivity() {
             )
         }
     }
-    
-    private fun checkAndRequestDefaultLauncher() {
-        // 检查当前是否为默认launcher
-        val intent = Intent(Intent.ACTION_MAIN).apply {
-            addCategory(Intent.CATEGORY_HOME)
-        }
-        
-        val resolveInfo = packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
-        val currentLauncher = resolveInfo?.activityInfo?.packageName
-        
-        // 如果不是当前应用，则请求设置为默认launcher
-        if (currentLauncher != packageName) {
-            requestDefaultLauncher()
-        }
-    }
-    
-    private fun requestDefaultLauncher() {
-        // 创建一个HOME intent来触发launcher选择器
-        val intent = Intent(Intent.ACTION_MAIN).apply {
-            addCategory(Intent.CATEGORY_HOME)
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
-        }
-        startActivity(intent)
-    }
 }
 
 @Composable
@@ -115,47 +89,29 @@ fun HomeScreen() {
     var dockUpdateTrigger by remember { mutableStateOf(0) }
     
     Box(modifier = Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
+        Row(
+            modifier = Modifier.fillMaxSize()
         ) {
-            // 状态栏 - Status Bar (Red Border)
-            StatusBar(
+            // Dock栏 - Dock Bar
+            DockBar(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    //.padding(start = 12.dp, top = 12.dp, end = 12.dp, bottom = 6.dp)
-                    //.clip(RoundedCornerShape(12.dp))
-                    .height(30.dp)
+                    .width(80.dp)
+                    .fillMaxHeight(),
+                onShowAppList = { showAppList = true },
+                onDockAppLongPress = { index ->
+                    selectedDockIndex = index
+                    showAppSelector = true
+                },
+                context = context,
+                updateTrigger = dockUpdateTrigger
             )
             
-            // 主内容区域 - Main Content Area
-            Row(
+            // 中间内容区域 - Content Area
+            ContentArea(
                 modifier = Modifier
                     .fillMaxSize()
-            ) {
-                // Dock栏 - Dock Bar (Green Border)
-                DockBar(
-                    modifier = Modifier
-                        //.padding(start = 12.dp, top = 6.dp, end = 6.dp, bottom = 12.dp)
-                        .width(56.dp)
-                        //.clip(RoundedCornerShape(12.dp))
-                        .fillMaxHeight(),
-                    onShowAppList = { showAppList = true },
-                    onDockAppLongPress = { index ->
-                        selectedDockIndex = index
-                        showAppSelector = true
-                    },
-                    context = context,
-                    updateTrigger = dockUpdateTrigger
-                )
-                
-                // 中间内容区域 - Content Area (Blue Border for each section)
-                ContentArea(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(start = 6.dp, top = 6.dp, end = 12.dp, bottom = 12.dp)
-                )
-            }
+                    .padding(8.dp)
+            )
         }
         
         // 应用列表浮动视图
@@ -181,40 +137,39 @@ fun HomeScreen() {
 }
 
 @Composable
-fun StatusBar(modifier: Modifier = Modifier) {
-    var currentTime by remember { mutableStateOf(getCurrentDateTime()) }
+fun DockTimeDisplay() {
+    var dateTime by remember { mutableStateOf(getDockDateTime()) }
     
-    // 更新时间
     LaunchedEffect(Unit) {
         while (true) {
+            dateTime = getDockDateTime()
             kotlinx.coroutines.delay(1000)
-            currentTime = getCurrentDateTime()
         }
     }
     
-    Box(
-        modifier = modifier
-            .background(Color.Black.copy(alpha = 0.5f))
-            .padding(horizontal = 6.dp),
-        contentAlignment = Alignment.CenterStart,
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
     ) {
-        // 时间和日期在一行显示
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Text(
-                text = currentTime.first,
-                color = Color.White,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = currentTime.second,
-                color = Color.White,
-                fontSize = 16.sp
-            )
-        }
+        // 时分
+        Text(
+            text = dateTime.first,
+            color = Color.White,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold
+        )
+        // 星期
+        Text(
+            text = dateTime.second,
+            color = Color.White,
+            fontSize = 14.sp
+        )
+        // 日期
+        Text(
+            text = dateTime.third,
+            color = Color.White.copy(alpha = 0.7f),
+            fontSize = 14.sp
+        )
     }
 }
 
@@ -229,7 +184,7 @@ fun DockBar(
 ) {
     val packageManager = context.packageManager
     
-    // 为每个dock位置加载应用信息，依赖updateTrigger触发重新加载
+    // 为每个dock位置加载应用信息
     val dockApps = remember(updateTrigger) {
         (0 until 5).map { index ->
             val packageName = DockPreferences.getDockApp(context, index)
@@ -253,20 +208,23 @@ fun DockBar(
     Box(
         modifier = modifier
             .background(blurBackground)
-            .padding(5.dp)
+            .padding(vertical = 6.dp)
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // 可滚动的应用图标区域
+            // 时间显示 (Dock栏固定在顶部)
+            DockTimeDisplay()
+            
+            // 应用列表 (占据中间剩余空间，可滚动)
             LazyColumn(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                //contentPadding = PaddingValues(top = 8.dp)
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(vertical = 10.dp)
             ) {
                 items(5) { index ->
                     val app = dockApps[index]
@@ -285,11 +243,11 @@ fun DockBar(
                 }
             }
             
-            // 固定在底部的所有应用按钮
-            Spacer(modifier = Modifier.height(12.dp))
+            // 所有应用按钮 (固定在Dock栏底部)
             Box(
                 modifier = Modifier
-                    .size(40.dp)
+                    .padding(top = 10.dp)
+                    .size(50.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .clickable { onShowAppList() },
                 contentAlignment = Alignment.Center
@@ -297,7 +255,7 @@ fun DockBar(
                 Image(
                     painter = painterResource(id = R.drawable.ic_action_apps),
                     contentDescription = "All Apps",
-                    modifier = Modifier.size(24.dp),
+                    modifier = Modifier.size(32.dp),
                     colorFilter = ColorFilter.tint(iconColor)
                 )
             }
@@ -318,15 +276,11 @@ fun DockAppItem(
         modifier = Modifier
             .size(50.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(Color.Transparent)
-            //.border(1.dp, iconColor, RoundedCornerShape(12.dp))
             .combinedClickable(
                 onClick = {
                     if (appInfo == null) {
-                        // 空位点击直接触发选择
                         onLongClick()
                     } else {
-                        // 有应用时点击启动
                         onClick()
                     }
                 },
@@ -341,19 +295,11 @@ fun DockAppItem(
                     contentDescription = appInfo.label,
                     modifier = Modifier.size(48.dp)
                 )
-            } ?: run {
-                Text(
-                    text = appInfo.label.take(1),
-                    color = Color.Black,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold
-                )
             }
         } else {
-            // 空位显示加号
             Text(
                 text = "+",
-                color = iconColor,
+                color = iconColor.copy(alpha = 0.5f),
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold
             )
@@ -364,18 +310,14 @@ fun DockAppItem(
 @Composable
 fun ContentArea(modifier: Modifier = Modifier) {
     Column(
-        modifier = modifier
-            .padding(8.dp),
+        modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // 地图区域 - Map Area
         MapSection(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
         )
-        
-        // 音乐播放器区域 - Music Player Area
         MusicSection(
             modifier = Modifier
                 .fillMaxWidth()
@@ -388,13 +330,13 @@ fun ContentArea(modifier: Modifier = Modifier) {
 fun MapSection(modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
-            .border(3.dp, Color.Blue)
-            .background(Color.Black.copy(alpha = 0.5f))
+            .border(2.dp, Color.Blue.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+            .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
             .padding(16.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
-            text = "地图区域\nMap Section",
+            text = "地图区域",
             color = Color.Blue,
             fontSize = 20.sp,
             fontWeight = FontWeight.Bold
@@ -406,13 +348,13 @@ fun MapSection(modifier: Modifier = Modifier) {
 fun MusicSection(modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
-            .border(3.dp, Color.Cyan)
-            .background(Color.Black.copy(alpha = 0.5f))
+            .border(2.dp, Color.Cyan.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+            .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
             .padding(16.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
-            text = "正在播放的音乐\nNow Playing",
+            text = "音乐播放区域",
             color = Color.Cyan,
             fontSize = 20.sp,
             fontWeight = FontWeight.Bold
@@ -420,7 +362,6 @@ fun MusicSection(modifier: Modifier = Modifier) {
     }
 }
 
-// 应用列表浮动视图
 @Composable
 fun AppListOverlay(onDismiss: () -> Unit) {
     val context = LocalContext.current
@@ -429,55 +370,48 @@ fun AppListOverlay(onDismiss: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.7f))
+            .background(Color.Black.copy(alpha = 0.8f))
             .clickable { onDismiss() },
         contentAlignment = Alignment.Center
     ) {
-        // 应用列表面板
         Box(
             modifier = Modifier
-                .fillMaxWidth(0.8f)
-                .fillMaxHeight(0.8f)
-                .clickable(enabled = false) { } // 阻止点击穿透
-                .background(
-                    color = Color(0xFF2A2A2A),
-                    shape = RoundedCornerShape(16.dp)
-                )
-                .border(2.dp, Color(0xFF00AA00), RoundedCornerShape(16.dp))
-                .padding(24.dp)
+                .fillMaxWidth(0.85f)
+                .fillMaxHeight(0.85f)
+                .clickable(enabled = false) { }
+                .background(Color(0xFF1A1A1A), RoundedCornerShape(24.dp))
+                .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(24.dp))
+                .padding(32.dp)
         ) {
-            Column(
-                modifier = Modifier.fillMaxSize()
-            ) {
-                // 标题栏
+            Column(modifier = Modifier.fillMaxSize()) {
+                // 标题栏带关闭按钮
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 16.dp),
+                        .padding(bottom = 24.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "所有应用",
                         color = Color.White,
-                        fontSize = 24.sp,
+                        fontSize = 28.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
                         text = "关闭",
-                        color = Color(0xFF00AA00),
-                        fontSize = 16.sp,
+                        color = Color.White,
+                        fontSize = 18.sp,
                         modifier = Modifier
                             .clickable { onDismiss() }
                             .padding(8.dp)
                     )
                 }
                 
-                // 应用网格
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(6),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(24.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
                     items(installedApps) { appInfo ->
@@ -495,76 +429,54 @@ fun AppListOverlay(onDismiss: () -> Unit) {
     }
 }
 
-// 应用项组件
 @Composable
-fun AppItem(
-    appInfo: AppInfo,
-    onClick: () -> Unit
-) {
+fun AppItem(appInfo: AppInfo, onClick: () -> Unit) {
     Column(
         modifier = Modifier
             .clickable(onClick = onClick)
-            .padding(8.dp),
+            .padding(4.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // 应用图标
         Box(
             modifier = Modifier
-                .size(56.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(Color.White),
+                .size(64.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color(0xFF2A2A2A)),
             contentAlignment = Alignment.Center
         ) {
             appInfo.icon?.let { drawable ->
                 Image(
                     painter = rememberDrawablePainter(drawable = drawable),
                     contentDescription = appInfo.label,
-                    modifier = Modifier.size(48.dp)
-                )
-            } ?: run {
-                // 备用：显示首字母
-                Text(
-                    text = appInfo.label.take(1),
-                    color = Color.Black,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold
+                    modifier = Modifier.size(52.dp)
                 )
             }
         }
-        
         Spacer(modifier = Modifier.height(8.dp))
-        
-        // 应用名称
         Text(
             text = appInfo.label,
             color = Color.White,
-            fontSize = 12.sp,
-            maxLines = 2,
+            fontSize = 13.sp,
+            maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.width(72.dp)
+            textAlign = TextAlign.Center
         )
     }
 }
 
-// 应用信息数据类
 data class AppInfo(
     val label: String,
     val packageName: String,
     val icon: Drawable? = null
 )
 
-// 获取已安装的应用列表
 fun getInstalledApps(context: Context): List<AppInfo> {
     val packageManager = context.packageManager
-    
-    // 创建查询launcher应用的intent
     val intent = Intent(Intent.ACTION_MAIN).apply {
         addCategory(Intent.CATEGORY_LAUNCHER)
     }
     
-    // 使用queryIntentActivities配合QUERY_ALL_PACKAGES权限获取所有应用
-    val apps = packageManager.queryIntentActivities(intent, PackageManager.MATCH_ALL)
+    return packageManager.queryIntentActivities(intent, PackageManager.MATCH_ALL)
         .mapNotNull { resolveInfo ->
             try {
                 val packageName = resolveInfo.activityInfo.packageName
@@ -573,58 +485,40 @@ fun getInstalledApps(context: Context): List<AppInfo> {
                 val label = applicationInfo?.loadLabel(packageManager)?.toString() 
                     ?: resolveInfo.loadLabel(packageManager).toString()
                 
-                AppInfo(
-                    label = label,
-                    packageName = packageName,
-                    icon = icon
-                )
+                AppInfo(label, packageName, icon)
             } catch (e: Exception) {
-                null // 忽略无法加载的应用
+                null
             }
         }
         .sortedBy { it.label.lowercase() }
-    
-    return apps
 }
 
-// 启动应用
 fun launchApp(context: Context, packageName: String) {
     try {
         val intent = context.packageManager.getLaunchIntentForPackage(packageName)
-        if (intent != null) {
-            context.startActivity(intent)
-        }
+        intent?.let { context.startActivity(it) }
     } catch (e: Exception) {
         e.printStackTrace()
     }
 }
 
-// Dock应用持久化管理
 object DockPreferences {
     private const val PREFS_NAME = "dock_prefs"
     private const val KEY_DOCK_APP = "dock_app_"
     
     fun saveDockApp(context: Context, index: Int, packageName: String) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putString(KEY_DOCK_APP + index, packageName)
-            .apply()
+            .edit {
+                putString(KEY_DOCK_APP + index, packageName)
+            }
     }
     
     fun getDockApp(context: Context, index: Int): String? {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .getString(KEY_DOCK_APP + index, null)
     }
-    
-    fun removeDockApp(context: Context, index: Int) {
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .remove(KEY_DOCK_APP + index)
-            .apply()
-    }
 }
 
-// 应用选择对话框
 @Composable
 fun AppSelectorDialog(
     onDismiss: () -> Unit,
@@ -636,27 +530,20 @@ fun AppSelectorDialog(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.7f))
+            .background(Color.Black.copy(alpha = 0.8f))
             .clickable { onDismiss() },
         contentAlignment = Alignment.Center
     ) {
-        // 应用选择面板
         Box(
             modifier = Modifier
-                .fillMaxWidth(0.7f)
-                .fillMaxHeight(0.7f)
+                .fillMaxWidth(0.8f)
+                .fillMaxHeight(0.8f)
                 .clickable(enabled = false) { }
-                .background(
-                    color = Color(0xFF2A2A2A),
-                    shape = RoundedCornerShape(16.dp)
-                )
-                .border(2.dp, Color(0xFF00AA00), RoundedCornerShape(16.dp))
+                .background(Color(0xFF1A1A1A), RoundedCornerShape(24.dp))
                 .padding(24.dp)
         ) {
-            Column(
-                modifier = Modifier.fillMaxSize()
-            ) {
-                // 标题栏
+            Column {
+                // 标题栏带关闭按钮
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -667,33 +554,26 @@ fun AppSelectorDialog(
                     Text(
                         text = "选择应用",
                         color = Color.White,
-                        fontSize = 20.sp,
+                        fontSize = 24.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "取消",
-                        color = Color(0xFF00AA00),
-                        fontSize = 14.sp,
+                        text = "关闭",
+                        color = Color.White,
+                        fontSize = 16.sp,
                         modifier = Modifier
                             .clickable { onDismiss() }
                             .padding(8.dp)
                     )
                 }
                 
-                // 应用网格
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(5),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.fillMaxSize()
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     items(installedApps) { appInfo ->
-                        AppItem(
-                            appInfo = appInfo,
-                            onClick = {
-                                onAppSelected(appInfo)
-                            }
-                        )
+                        AppItem(appInfo = appInfo, onClick = { onAppSelected(appInfo) })
                     }
                 }
             }
@@ -701,16 +581,17 @@ fun AppSelectorDialog(
     }
 }
 
-// 获取当前日期和时间
-fun getCurrentDateTime(): Pair<String, String> {
+fun getDockDateTime(): Triple<String, String, String> {
     val calendar = Calendar.getInstance()
-    val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-    val dateFormat = SimpleDateFormat("yyyy-MM-dd EEEE", Locale.getDefault())
+    val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+    val weekFormat = SimpleDateFormat("EEEE", Locale.getDefault())
+    val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
     
-    val time = timeFormat.format(calendar.time)
-    val date = dateFormat.format(calendar.time)
-    
-    return Pair(time, date)
+    return Triple(
+        timeFormat.format(calendar.time),
+        weekFormat.format(calendar.time),
+        dateFormat.format(calendar.time)
+    )
 }
 
 @Preview(showBackground = true, widthDp = 1280, heightDp = 720)
