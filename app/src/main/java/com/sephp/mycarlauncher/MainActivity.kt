@@ -33,7 +33,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -48,8 +50,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -160,13 +164,15 @@ fun DockTimeDisplay() {
         Text(
             text = dateTime.second,
             color = Color.White,
-            fontSize = 14.sp
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold
         )
         // 日期
         Text(
             text = dateTime.third,
-            color = Color.White.copy(alpha = 0.7f),
-            fontSize = 14.sp
+            color = Color.White,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold
         )
     }
 }
@@ -345,18 +351,108 @@ fun MapSection(modifier: Modifier = Modifier) {
 
 @Composable
 fun MusicSection(modifier: Modifier = Modifier) {
+    var isPlaying by remember { mutableStateOf(false) }
+    
     Box(
         modifier = modifier
             .border(2.dp, Color.Cyan.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
             .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
-            .padding(16.dp),
+            .padding(20.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(24.dp)
+        ) {
+            // 专辑封面
+            Box(
+                modifier = Modifier
+                    .size(140.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.DarkGray),
+                contentAlignment = Alignment.Center
+            ) {
+                // 这里暂时用一个占位图标，实际开发中可以接入媒体库获取封面
+                Icon(
+                    imageVector = ImageVector.vectorResource(R.drawable.play_arrow),
+                    contentDescription = "Album Art Placeholder",
+                    modifier = Modifier.size(64.dp),
+                    tint = Color.Gray
+                )
+            }
+            
+            // 歌曲信息和控制按钮
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = "未在播放",
+                    color = Color.White,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "点击播放开始享受音乐",
+                    color = Color.LightGray,
+                    fontSize = 18.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // 控制按钮
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    MusicControlButton(
+                        icon = ImageVector.vectorResource(R.drawable.skip_previous),
+                        contentDescription = "Previous",
+                        onClick = { /* TODO */ }
+                    )
+                    
+                    MusicControlButton(
+                        icon = ImageVector.vectorResource(if (isPlaying) R.drawable.pause else R.drawable.play_arrow), // 暂时都用Play，稍后添加Pause
+                        contentDescription = if (isPlaying) "Pause" else "Play",
+                        isMain = true,
+                        onClick = { isPlaying = !isPlaying }
+                    )
+                    
+                    MusicControlButton(
+                        icon = ImageVector.vectorResource(R.drawable.skip_next),
+                        contentDescription = "Next",
+                        onClick = { /* TODO */ }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MusicControlButton(
+    icon: ImageVector,
+    contentDescription: String,
+    isMain: Boolean = false,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(if (isMain) 64.dp else 48.dp)
+            .clip(CircleShape)
+            .background(if (isMain) Color.Cyan.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.1f))
+            .clickable { onClick() },
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = "音乐播放区域",
-            color = Color.Cyan,
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Bold
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            modifier = Modifier.size(if (isMain) 36.dp else 28.dp),
+            tint = if (isMain) Color.Cyan else Color.White
         )
     }
 }

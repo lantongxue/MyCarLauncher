@@ -53,7 +53,8 @@ dependencies {
     
     // Accompanist for Drawable support in Compose
     implementation("com.google.accompanist:accompanist-drawablepainter:0.36.0")
-    
+    implementation(libs.androidx.material3)
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
