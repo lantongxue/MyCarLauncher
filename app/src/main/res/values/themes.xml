@@ -5,4 +5,9 @@
         <item name="android:windowShowWallpaper">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>
     </style>
+
+    <!-- 启动主题，防止冷启动黑屏 -->
+    <style name="Theme.MyCarLauncher.Starting" parent="Theme.MyCarLauncher">
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
 </resources>
