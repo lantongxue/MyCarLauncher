@@ -34,7 +34,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -264,7 +263,7 @@ data class MusicState(
     val isPlaying: Boolean = false,
     val currentPosition: Long = 0L,
     val totalDuration: Long = 0L,
-    val lyrics: List<LyricLine> = emptyList()  // 歌词列表
+    val lyrics: List<LyricLine> = emptyList()
 )
 
 @Composable
@@ -369,6 +368,7 @@ fun MusicSection(modifier: Modifier = Modifier) {
             controller = activeController
             activeController?.registerCallback(callback)
             updateMusicState(activeController)
+            // AudioVisualizer 已在 LaunchedEffect 中初始化
         } catch (e: SecurityException) {
             e.printStackTrace()
             Toast.makeText(context, "获取媒体会话失败: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -390,11 +390,18 @@ fun MusicSection(modifier: Modifier = Modifier) {
         }
     }
 
-    Box(modifier = modifier.border(2.dp, Color.Cyan.copy(alpha = 0.3f), RoundedCornerShape(12.dp)).background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(12.dp)).padding(20.dp)) {
+    Box(
+        modifier = modifier
+            .border(2.dp, Color.Cyan.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+            .padding(20.dp)
+    ) {
+        // 主要内容层
         Row(modifier = Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(24.dp)) {
             // 左侧：音乐信息和控制按钮区域
             Box(modifier = Modifier.weight(1f)) {
-                // 背景进度条 - 使用动画实现平滑过渡
+                // 背景进度条层 - 只在左侧音乐控制区域显示
                 val targetProgress = if (musicState.totalDuration > 0) {
                     (musicState.currentPosition.toFloat() / musicState.totalDuration.toFloat()).coerceIn(0f, 1f)
                 } else {
@@ -405,46 +412,40 @@ fun MusicSection(modifier: Modifier = Modifier) {
                 val animatedProgress by animateFloatAsState(
                     targetValue = targetProgress,
                     animationSpec = tween(
-                        durationMillis = 1000,  // 1秒过渡时间，与更新频率匹配
-                        easing = LinearEasing    // 线性缓动，确保流畅
+                        durationMillis = 80,
+                        easing = LinearEasing
                     ),
                     label = "progress_animation"
                 )
                 
+                // 背景进度条 - 独立层级
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
+                        .fillMaxWidth(animatedProgress)
                         .fillMaxHeight()
                         .clip(RoundedCornerShape(12.dp))
+                        .background(Color.Cyan.copy(alpha = 0.15f))
+                )
+                
+                // 音乐信息内容层
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.Center
                 ) {
-                    // 背景进度条
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(animatedProgress)
-                            .fillMaxHeight()
-                            .background(Color.Cyan.copy(alpha = 0.15f))
-                    )
-                    
-                    // 音乐信息内容
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 16.dp),
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Text(text = musicState.title, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(text = musicState.artist, color = Color.LightGray, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            MusicControlButton(icon = ImageVector.vectorResource(R.drawable.skip_previous), contentDescription = "Previous", onClick = { controller?.transportControls?.skipToPrevious() })
-                            MusicControlButton(
-                                icon = ImageVector.vectorResource(if (musicState.isPlaying) R.drawable.pause else R.drawable.play_arrow),
-                                contentDescription = if (musicState.isPlaying) "Pause" else "Play",
-                                isMain = true,
-                                onClick = { if (musicState.isPlaying) controller?.transportControls?.pause() else controller?.transportControls?.play() }
-                            )
-                            MusicControlButton(icon = ImageVector.vectorResource(R.drawable.skip_next), contentDescription = "Next", onClick = { controller?.transportControls?.skipToNext() })
-                        }
+                    Text(text = musicState.title, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(text = musicState.artist, color = Color.White, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        MusicControlButton(icon = ImageVector.vectorResource(R.drawable.skip_previous), contentDescription = "Previous", onClick = { controller?.transportControls?.skipToPrevious() })
+                        MusicControlButton(
+                            icon = ImageVector.vectorResource(if (musicState.isPlaying) R.drawable.pause else R.drawable.play_arrow),
+                            contentDescription = if (musicState.isPlaying) "Pause" else "Play",
+                            isMain = true,
+                            onClick = { if (musicState.isPlaying) controller?.transportControls?.pause() else controller?.transportControls?.play() }
+                        )
+                        MusicControlButton(icon = ImageVector.vectorResource(R.drawable.skip_next), contentDescription = "Next", onClick = { controller?.transportControls?.skipToNext() })
                     }
                 }
             }
@@ -492,20 +493,6 @@ fun MusicSection(modifier: Modifier = Modifier) {
     }
 }
 
-private fun updateMusicTextState(controller: MediaController?, onUpdate: (MusicState) -> Unit) {
-    if (controller == null) {
-        onUpdate(MusicState())
-        return
-    }
-    val metadata = controller.metadata
-    val playbackState = controller.playbackState
-    onUpdate(MusicState(
-        title = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE) ?: "未知曲目",
-        artist = metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: "未知艺术家",
-        isPlaying = playbackState?.state == PlaybackState.STATE_PLAYING
-    ))
-}
-
 @Composable
 fun MusicControlButton(icon: ImageVector, contentDescription: String, isMain: Boolean = false, onClick: () -> Unit) {
     Box(
@@ -515,6 +502,7 @@ fun MusicControlButton(icon: ImageVector, contentDescription: String, isMain: Bo
         Icon(imageVector = icon, contentDescription = contentDescription, modifier = Modifier.size(if (isMain) 36.dp else 28.dp), tint = if (isMain) Color.Cyan else Color.White)
     }
 }
+
 
 @Composable
 fun LyricsDisplay(lyrics: List<LyricLine>, currentPosition: Long) {
