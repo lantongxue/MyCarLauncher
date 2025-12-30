@@ -12,6 +12,10 @@ import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.os.Bundle
 import android.provider.Settings
+import android.view.WindowManager
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
@@ -19,9 +23,6 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -34,10 +35,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -45,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -72,6 +74,17 @@ class MainActivity : ComponentActivity() {
         // 切换到正常主题，防止冷启动黑屏
         setTheme(R.style.Theme_MyCarLauncher)
         super.onCreate(savedInstanceState)
+        
+        // 屏幕常亮
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        
+        // 全屏显示（隐藏状态栏和导航栏）
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            hide(WindowInsetsCompat.Type.systemBars())
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+        
         enableEdgeToEdge()
         setContent {
             MyCarLauncherTheme {
@@ -235,9 +248,9 @@ fun DockAppItem(appInfo: AppInfo?, onClick: () -> Unit, onLongClick: () -> Unit,
 
 @Composable
 fun ContentArea(modifier: Modifier = Modifier) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        MapSection(modifier = Modifier.fillMaxWidth().weight(1f))
-        MusicSection(modifier = Modifier.fillMaxWidth().weight(1f))
+    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        MapSection(modifier = Modifier.fillMaxHeight().weight(0.7f))
+        MusicSection(modifier = Modifier.fillMaxHeight().weight(0.3f))
     }
 }
 
@@ -251,19 +264,15 @@ fun MapSection(modifier: Modifier = Modifier) {
     }
 }
 
-data class LyricLine(
-    val time: Long,      // 歌词对应的时间（毫秒）
-    val text: String     // 歌词文本
-)
-
 data class MusicState(
     val title: String = "未在播放",
     val artist: String = "点击播放开始享受音乐",
+    var singer: String = "-",
+    val currentLyricLine: String = "-",
     val albumArt: Bitmap? = null,
     val isPlaying: Boolean = false,
     val currentPosition: Long = 0L,
-    val totalDuration: Long = 0L,
-    val lyrics: List<LyricLine> = emptyList()
+    val totalDuration: Long = 0L
 )
 
 @Composable
@@ -274,7 +283,7 @@ fun MusicSection(modifier: Modifier = Modifier) {
     val coroutineScope = rememberCoroutineScope()
 
     // 异步更新音乐信息，包括封面
-    fun updateMusicState(mediaController: MediaController?) {
+    fun updateMusicState(mediaController: MediaController?, forceResetPosition: Boolean = false) {
         if (mediaController == null) {
             musicState = MusicState()
             return
@@ -283,20 +292,32 @@ fun MusicSection(modifier: Modifier = Modifier) {
         val metadata = mediaController.metadata
         val playbackState = mediaController.playbackState
         
-        val title = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE) ?: "未知曲目"
+        val newTitle = metadata?.getString("android.media.metadata.CUSTOM_FIELD_TITLE") ?: "未知曲目"
+        val singer = metadata?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE) ?: "未知歌手"
         val artist = metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: "未知艺术家"
         val isPlaying = playbackState?.state == PlaybackState.STATE_PLAYING
-        val currentPosition = playbackState?.position ?: 0L
         val totalDuration = metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
+        val currentLyricLine = metadata?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE) ?: "-"
         
-        // 先更新文字信息（使用空歌词）
+        // 处理播放位置的三种情况
+        val isFirstLoad = musicState.title == "未在播放" // APP刚打开，首次加载
+        val isSongChanged = newTitle != musicState.title && !isFirstLoad // 切换歌曲
+        
+        val newPosition = when {
+            forceResetPosition || isSongChanged -> 0L // 切歌时归零
+            isFirstLoad -> playbackState?.position ?: 0L // 首次加载读取真实位置
+            else -> musicState.currentPosition // 其他情况保持当前位置
+        }
+
+        // 更新音乐状态信息
         musicState = musicState.copy(
-            title = title,
+            title = newTitle,
+            singer = singer,
             artist = artist,
             isPlaying = isPlaying,
-            currentPosition = currentPosition,
-            totalDuration = totalDuration,
-            lyrics = emptyList()  // 先清空歌词
+            currentLyricLine = currentLyricLine,
+            currentPosition = newPosition,
+            totalDuration = totalDuration
         )
         
         // 异步加载封面
@@ -312,20 +333,6 @@ fun MusicSection(modifier: Modifier = Modifier) {
             }
             musicState = musicState.copy(albumArt = albumArt)
         }
-        
-        // 异步加载真实歌词
-        coroutineScope.launch {
-            try {
-                Log.d("MusicSection", "Fetching lyrics for: $title - $artist")
-                val lyrics = LyricsService.getLyrics(title, artist)
-                musicState = musicState.copy(lyrics = lyrics)
-                Log.d("MusicSection", "Lyrics loaded: ${lyrics.size} lines")
-            } catch (e: Exception) {
-                Log.e("MusicSection", "Error loading lyrics", e)
-                // 歌词加载失败时使用演示歌词
-                musicState = musicState.copy(lyrics = generateDemoLyrics(title))
-            }
-        }
     }
 
     val callback = remember {
@@ -336,9 +343,10 @@ fun MusicSection(modifier: Modifier = Modifier) {
             }
             override fun onPlaybackStateChanged(state: PlaybackState?) {
                 Log.d("MusicSection", "Playback state changed: ${state?.state}")
+                // 只更新播放状态，不更新位置（避免进度条跳变）
+                // 位置由 LaunchedEffect 平滑更新
                 musicState = musicState.copy(
-                    isPlaying = state?.state == PlaybackState.STATE_PLAYING,
-                    currentPosition = state?.position ?: 0L
+                    isPlaying = state?.state == PlaybackState.STATE_PLAYING
                 )
             }
         }
@@ -380,13 +388,33 @@ fun MusicSection(modifier: Modifier = Modifier) {
         }
     }
 
-    // 定时更新播放位置
-    LaunchedEffect(musicState.isPlaying) {
+    // 定时更新播放位置 - 使用增量计算避免跳变
+    LaunchedEffect(musicState.isPlaying, musicState.title) {
+        var lastUpdateTime = System.currentTimeMillis()
+        
         while (musicState.isPlaying) {
-            controller?.playbackState?.let { playbackState ->
-                musicState = musicState.copy(currentPosition = playbackState.position)
+            kotlinx.coroutines.delay(100) // 每100ms更新一次，更平滑
+            
+            val currentTime = System.currentTimeMillis()
+            val elapsed = currentTime - lastUpdateTime
+            lastUpdateTime = currentTime
+            
+            // 使用增量更新，避免直接读取播放器位置导致的跳变
+            val newPosition = (musicState.currentPosition + elapsed).coerceAtMost(musicState.totalDuration)
+            
+            // 每5秒同步一次真实位置，纠正累积误差
+            if (newPosition % 5000 < 100) {
+                controller?.playbackState?.let { playbackState ->
+                    val realPosition = playbackState.position
+                    // 只在误差超过1秒时才同步
+                    if (kotlin.math.abs(realPosition - newPosition) > 1000) {
+                        musicState = musicState.copy(currentPosition = realPosition)
+                        return@let
+                    }
+                }
             }
-            kotlinx.coroutines.delay(1000) // 每秒更新
+            
+            musicState = musicState.copy(currentPosition = newPosition)
         }
     }
 
@@ -395,80 +423,18 @@ fun MusicSection(modifier: Modifier = Modifier) {
             .border(2.dp, Color.Cyan.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
             .clip(RoundedCornerShape(12.dp))
             .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
-            .padding(20.dp)
+            .padding(12.dp)
     ) {
-        // 主要内容层
-        Row(modifier = Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-            // 左侧：音乐信息和控制按钮区域
-            Box(modifier = Modifier.weight(1f)) {
-                // 背景进度条层 - 只在左侧音乐控制区域显示
-                val targetProgress = if (musicState.totalDuration > 0) {
-                    (musicState.currentPosition.toFloat() / musicState.totalDuration.toFloat()).coerceIn(0f, 1f)
-                } else {
-                    0f
-                }
-                
-                // 添加平滑动画过渡
-                val animatedProgress by animateFloatAsState(
-                    targetValue = targetProgress,
-                    animationSpec = tween(
-                        durationMillis = 80,
-                        easing = LinearEasing
-                    ),
-                    label = "progress_animation"
-                )
-                
-                // 背景进度条 - 独立层级
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(animatedProgress)
-                        .fillMaxHeight()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color.Cyan.copy(alpha = 0.15f))
-                )
-                
-                // 音乐信息内容层
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Text(text = musicState.title, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(text = musicState.artist, color = Color.White, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        MusicControlButton(icon = ImageVector.vectorResource(R.drawable.skip_previous), contentDescription = "Previous", onClick = { controller?.transportControls?.skipToPrevious() })
-                        MusicControlButton(
-                            icon = ImageVector.vectorResource(if (musicState.isPlaying) R.drawable.pause else R.drawable.play_arrow),
-                            contentDescription = if (musicState.isPlaying) "Pause" else "Play",
-                            isMain = true,
-                            onClick = { if (musicState.isPlaying) controller?.transportControls?.pause() else controller?.transportControls?.play() }
-                        )
-                        MusicControlButton(icon = ImageVector.vectorResource(R.drawable.skip_next), contentDescription = "Next", onClick = { controller?.transportControls?.skipToNext() })
-                    }
-                }
-            }
-            
-            // 中间：歌词显示区域
+        // 主要内容层 - 垂直布局（适应30%宽度的垂直空间）
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // 顶部：专辑封面
             Box(
                 modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color.Black.copy(alpha = 0.2f)),
-                contentAlignment = Alignment.Center
-            ) {
-                LyricsDisplay(
-                    lyrics = musicState.lyrics,
-                    currentPosition = musicState.currentPosition
-                )
-            }
-            
-            // 右侧：专辑封面
-            Box(
-                modifier = Modifier
-                    .size(180.dp)
+                    .size(100.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(Color.DarkGray),
                 contentAlignment = Alignment.Center
@@ -484,10 +450,118 @@ fun MusicSection(modifier: Modifier = Modifier) {
                     Icon(
                         imageVector = ImageVector.vectorResource(R.drawable.play_arrow),
                         contentDescription = null,
-                        modifier = Modifier.size(80.dp),
+                        modifier = Modifier.size(40.dp),
                         tint = Color.Gray
                     )
                 }
+            }
+            
+            // 中间：音乐信息（标题、艺术家）
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = musicState.title,
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center
+                )
+                Text(
+                    text = musicState.singer,
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center
+                )
+            }
+            
+            // 进度条 - 使用 Material3 LinearProgressIndicator
+            val progress by remember {
+                derivedStateOf {
+                    if (musicState.totalDuration > 0) {
+                        (musicState.currentPosition.toFloat() / musicState.totalDuration.toFloat()).coerceIn(0f, 1f)
+                    } else {
+                        0f
+                    }
+                }
+            }
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp)),
+                color = Color.Cyan,
+                trackColor = Color.White.copy(alpha = 0.2f),
+                gapSize = 0.dp,
+                strokeCap = StrokeCap.Square,
+                drawStopIndicator = {} // 禁用尾部停止指示器
+            )
+            
+            // 播放时间显示
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = formatDuration(musicState.currentPosition),
+                    color = Color.White.copy(alpha = 0.7f),
+                    fontSize = 12.sp
+                )
+                Text(
+                    text = formatDuration(musicState.totalDuration),
+                    color = Color.White.copy(alpha = 0.7f),
+                    fontSize = 12.sp
+                )
+            }
+            
+            // 控制按钮
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                MusicControlButton(
+                    icon = ImageVector.vectorResource(R.drawable.skip_previous),
+                    contentDescription = "Previous",
+                    onClick = { controller?.transportControls?.skipToPrevious() }
+                )
+                MusicControlButton(
+                    icon = ImageVector.vectorResource(if (musicState.isPlaying) R.drawable.pause else R.drawable.play_arrow),
+                    contentDescription = if (musicState.isPlaying) "Pause" else "Play",
+                    isMain = true,
+                    onClick = { if (musicState.isPlaying) controller?.transportControls?.pause() else controller?.transportControls?.play() }
+                )
+                MusicControlButton(
+                    icon = ImageVector.vectorResource(R.drawable.skip_next),
+                    contentDescription = "Next",
+                    onClick = { controller?.transportControls?.skipToNext() }
+                )
+            }
+            
+            // 当前歌词显示区域（占据剩余空间）
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color.Black.copy(alpha = 0.2f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = musicState.currentLyricLine,
+                    color = Color.Cyan,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                )
             }
         }
     }
@@ -500,83 +574,6 @@ fun MusicControlButton(icon: ImageVector, contentDescription: String, isMain: Bo
         contentAlignment = Alignment.Center
     ) {
         Icon(imageVector = icon, contentDescription = contentDescription, modifier = Modifier.size(if (isMain) 36.dp else 28.dp), tint = if (isMain) Color.Cyan else Color.White)
-    }
-}
-
-
-@Composable
-fun LyricsDisplay(lyrics: List<LyricLine>, currentPosition: Long) {
-    if (lyrics.isEmpty()) {
-        // 无歌词时显示提示
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Icon(
-                imageVector = ImageVector.vectorResource(R.drawable.play_arrow),
-                contentDescription = null,
-                modifier = Modifier.size(48.dp),
-                tint = Color.Gray.copy(alpha = 0.5f)
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "正在享受音乐",
-                color = Color.Gray.copy(alpha = 0.7f),
-                fontSize = 16.sp
-            )
-        }
-    } else {
-        // 有歌词时显示歌词列表
-        val listState = rememberLazyListState()
-        
-        // 查找当前歌词索引
-        val currentLyricIndex = remember(currentPosition, lyrics) {
-            lyrics.indexOfLast { it.time <= currentPosition }.coerceAtLeast(0)
-        }
-        
-        // 自动滚动到当前歌词
-        LaunchedEffect(currentLyricIndex) {
-            if (currentLyricIndex > 0 && currentLyricIndex < lyrics.size) {
-                try {
-                    listState.animateScrollToItem(
-                        index = (currentLyricIndex - 1).coerceAtLeast(0),
-                        scrollOffset = 0
-                    )
-                } catch (e: Exception) {
-                    Log.e("LyricsDisplay", "Error scrolling to lyric", e)
-                }
-            }
-        }
-        
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(vertical = 16.dp, horizontal = 12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            items(lyrics.size) { index ->
-                val lyric = lyrics[index]
-                val isCurrent = index == currentLyricIndex
-                val isPast = index < currentLyricIndex
-                
-                Text(
-                    text = lyric.text,
-                    color = when {
-                        isCurrent -> Color.Cyan
-                        isPast -> Color.Gray.copy(alpha = 0.5f)
-                        else -> Color.White.copy(alpha = 0.7f)
-                    },
-                    fontSize = if (isCurrent) 20.sp else 16.sp,
-                    fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
-                    textAlign = TextAlign.Center,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-        }
     }
 }
 
@@ -718,28 +715,12 @@ fun getDockDateTime(): Triple<String, String, String> {
     return Triple(SimpleDateFormat("HH:mm", Locale.getDefault()).format(calendar.time), SimpleDateFormat("EEEE", Locale.getDefault()).format(calendar.time), SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(calendar.time))
 }
 
-// 演示用的模拟歌词生成器（实际应用中应从外部源获取）
-fun generateDemoLyrics(songTitle: String): List<LyricLine> {
-    // 这里可以根据歌曲名称返回模拟歌词
-    // 实际应用中应该：
-    // 1. 从本地LRC文件读取
-    // 2. 从在线API获取（如QQ音乐、网易云音乐API）
-    // 3. 从媒体元数据中解析（如果支持）
-    
-    return listOf(
-        LyricLine(0, "正在播放: $songTitle"),
-        LyricLine(5000, "欢迎使用车载启动器"),
-        LyricLine(10000, "享受你的音乐时光"),
-        LyricLine(15000, "此处应显示真实歌词"),
-        LyricLine(20000, "可以通过LRC文件加载"),
-        LyricLine(25000, "或者从在线API获取"),
-        LyricLine(30000, "歌词会根据播放进度"),
-        LyricLine(35000, "自动滚动并高亮显示"),
-        LyricLine(40000, "当前歌词以青色显示"),
-        LyricLine(45000, "已播放的歌词变暗"),
-        LyricLine(50000, "未播放的歌词为白色"),
-        LyricLine(55000, "感谢你的使用")
-    )
+// 格式化播放时长（毫秒转 mm:ss）
+fun formatDuration(durationMs: Long): String {
+    val totalSeconds = durationMs / 1000
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return "%d:%02d".format(minutes, seconds)
 }
 
 @Preview(showBackground = true, widthDp = 1280, heightDp = 720)
