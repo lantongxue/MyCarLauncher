@@ -57,9 +57,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.edit
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import coil.request.CachePolicy
 import com.google.accompanist.drawablepainter.rememberDrawablePainter
 import com.sephp.mycarlauncher.ui.theme.MyCarLauncherTheme
 import kotlinx.coroutines.Dispatchers
@@ -102,7 +106,17 @@ fun HomeScreen() {
     var selectedDockIndex by remember { mutableStateOf<Int?>(null) }
     var dockUpdateTrigger by remember { mutableIntStateOf(0) }
     
+    // 壁纸URL状态，每次重组时生成新的时间戳以获取新壁纸
+    val wallpaperUrl = remember {
+        "https://bing.img.run/rand_m.php?t=${System.currentTimeMillis()}"
+    }
+    
     Box(modifier = Modifier.fillMaxSize()) {
+        // 壁纸背景层（带高斯模糊）
+        WallpaperBackground(
+            imageUrl = wallpaperUrl,
+            modifier = Modifier.fillMaxSize()
+        )
         Row(modifier = Modifier.fillMaxSize()) {
             DockBar(
                 modifier = Modifier.width(80.dp).fillMaxHeight(),
@@ -713,6 +727,62 @@ fun AppSelectorDialog(onDismiss: () -> Unit, onAppSelected: (AppInfo) -> Unit, c
 fun getDockDateTime(): Triple<String, String, String> {
     val calendar = Calendar.getInstance()
     return Triple(SimpleDateFormat("HH:mm", Locale.getDefault()).format(calendar.time), SimpleDateFormat("EEEE", Locale.getDefault()).format(calendar.time), SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(calendar.time))
+}
+
+/**
+ * 壁纸背景组件，从网络加载图片并应用高斯模糊效果
+ */
+@Composable
+fun WallpaperBackground(
+    imageUrl: String,
+    modifier: Modifier = Modifier,
+    blurRadius: Int = 10 // 模糊半径，范围 1-25 dp
+) {
+    val context = LocalContext.current
+    var isLoading by remember { mutableStateOf(true) }
+    var hasError by remember { mutableStateOf(false) }
+    
+    Box(modifier = modifier) {
+        // 默认背景色（加载中或加载失败时显示）
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF1A1A2E))
+        )
+        
+        // 壁纸图片（带高斯模糊）
+        AsyncImage(
+            model = ImageRequest.Builder(context)
+                .data(imageUrl)
+                .crossfade(true)
+                .diskCachePolicy(CachePolicy.DISABLED) // 禁用缓存以确保每次获取新图片
+                .memoryCachePolicy(CachePolicy.DISABLED)
+                .build(),
+            contentDescription = "壁纸背景",
+            modifier = Modifier
+                .fillMaxSize()
+                .blur(blurRadius.dp), // 应用高斯模糊
+            contentScale = ContentScale.Crop,
+            onLoading = { isLoading = true },
+            onSuccess = { 
+                isLoading = false
+                hasError = false
+            },
+            onError = {
+                isLoading = false
+                hasError = true
+                // 根据规则，所有异常必须 Toast 提示
+                Toast.makeText(context, "加载壁纸失败", Toast.LENGTH_SHORT).show()
+            }
+        )
+        
+        // 叠加一层半透明黑色遮罩，增强内容可读性
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.3f))
+        )
+    }
 }
 
 // 格式化播放时长（毫秒转 mm:ss）
