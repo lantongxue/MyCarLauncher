@@ -16,6 +16,11 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        
+        // 高德地图SDK需要的NDK架构配置
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64")
+        }
     }
 
     buildTypes {
@@ -36,6 +41,13 @@ android {
     }
     buildFeatures {
         compose = true
+    }
+    
+    packaging {
+        jniLibs {
+            // 确保高德地图SO库被正确打包
+            useLegacyPackaging = true
+        }
     }
 }
 
@@ -66,6 +78,9 @@ dependencies {
     
     // Coil for image loading in Compose
     implementation("io.coil-kt:coil-compose:2.6.0")
+    
+    // 高德地图SDK - 使用具体版本号确保SO库正确加载
+    implementation("com.amap.api:navi-3dmap-location-search:latest.integration")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

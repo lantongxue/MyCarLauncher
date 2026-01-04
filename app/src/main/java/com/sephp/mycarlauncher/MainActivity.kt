@@ -23,6 +23,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -35,6 +36,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -60,10 +62,32 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.request.CachePolicy
+import com.amap.api.maps.AMap
+import com.amap.api.maps.CameraUpdateFactory
+import com.amap.api.maps.MapView
+import com.amap.api.maps.MapsInitializer
+import com.amap.api.maps.model.LatLng
+import com.amap.api.maps.model.MarkerOptions
+import com.amap.api.maps.model.MyLocationStyle
+import com.amap.api.navi.AMapNavi
+import com.amap.api.navi.AmapNaviPage
+import com.amap.api.navi.AmapNaviParams
+import com.amap.api.navi.AmapNaviType
+import com.amap.api.navi.AmapPageType
+import com.amap.api.navi.INaviInfoCallback
+import com.amap.api.navi.NaviSetting
+import com.amap.api.navi.model.AMapNaviLocation
+import com.amap.api.navi.model.NaviLatLng
+import com.amap.api.services.core.PoiItemV2
+import com.amap.api.services.poisearch.PoiResultV2
+import com.amap.api.services.poisearch.PoiSearchV2
 import com.google.accompanist.drawablepainter.rememberDrawablePainter
 import com.sephp.mycarlauncher.ui.theme.MyCarLauncherTheme
 import kotlinx.coroutines.Dispatchers
@@ -74,11 +98,31 @@ import java.util.Calendar
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
+    private val locationPermissionRequest = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        when {
+            permissions[android.Manifest.permission.ACCESS_FINE_LOCATION] == true -> {
+                Toast.makeText(this, "定位权限已授予", Toast.LENGTH_SHORT).show()
+            }
+            permissions[android.Manifest.permission.ACCESS_COARSE_LOCATION] == true -> {
+                Toast.makeText(this, "定位权限已授予", Toast.LENGTH_SHORT).show()
+            }
+            else -> {
+                Toast.makeText(this, "定位权限被拒绝，地图功能受限", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+    
     override fun onCreate(savedInstanceState: Bundle?) {
         // 切换到正常主题，防止冷启动黑屏
         setTheme(R.style.Theme_MyCarLauncher)
         super.onCreate(savedInstanceState)
         
+        // 高德地图SDK隐私合规设置 - 必须在SDK任何接口调用之前设置
+        MapsInitializer.updatePrivacyShow(this, true, true)
+        MapsInitializer.updatePrivacyAgree(this, true)
+
         // 屏幕常亮
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         
@@ -90,10 +134,29 @@ class MainActivity : ComponentActivity() {
         }
         
         enableEdgeToEdge()
+        
+        // 请求定位权限
+        checkAndRequestPermissions()
+        
         setContent {
             MyCarLauncherTheme {
                 HomeScreen()
             }
+        }
+    }
+    
+    private fun checkAndRequestPermissions() {
+        val permissions = arrayOf(
+            android.Manifest.permission.ACCESS_FINE_LOCATION,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION
+        )
+        
+        val permissionsToRequest = permissions.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        
+        if (permissionsToRequest.isNotEmpty()) {
+            locationPermissionRequest.launch(permissionsToRequest.toTypedArray())
         }
     }
 }
@@ -270,11 +333,301 @@ fun ContentArea(modifier: Modifier = Modifier) {
 
 @Composable
 fun MapSection(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    var mapView by remember { mutableStateOf<MapView?>(null) }
+    var aMap by remember { mutableStateOf<AMap?>(null) }
+    var naviInfo by remember { mutableStateOf("点击地图开始导航") }
+    var searchQuery by remember { mutableStateOf("") }
+    var searchResults by remember { mutableStateOf<List<PoiItemV2>>(emptyList()) }
+    var showSearchResults by remember { mutableStateOf(false) }
+    var isSearching by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+
+    NaviSetting.updatePrivacyShow(context, true, true)
+    NaviSetting.updatePrivacyAgree(context, true)
+    
+    // 搜索功能
+    fun performSearch(keyword: String) {
+        if (keyword.isBlank()) {
+            searchResults = emptyList()
+            showSearchResults = false
+            return
+        }
+        
+        isSearching = true
+        coroutineScope.launch(Dispatchers.IO) {
+            try {
+                val query = PoiSearchV2.Query(keyword, "", "")
+                query.pageSize = 10
+                query.pageNum = 1
+                
+                val poiSearch = PoiSearchV2(context, query)
+                poiSearch.setOnPoiSearchListener(object : PoiSearchV2.OnPoiSearchListener {
+                    override fun onPoiSearched(result: PoiResultV2?, code: Int) {
+                        isSearching = false
+                        if (code == 1000 && result != null) {
+                            searchResults = result.pois ?: emptyList()
+                            showSearchResults = searchResults.isNotEmpty()
+                        } else {
+                            coroutineScope.launch(Dispatchers.Main) {
+                                Toast.makeText(context, "搜索失败，错误码: $code", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                    
+                    override fun onPoiItemSearched(poiItem: PoiItemV2?, code: Int) {}
+                })
+                poiSearch.searchPOIAsyn()
+            } catch (e: Exception) {
+                isSearching = false
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "搜索异常: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+    
+    // 开始导航到指定位置
+    fun startNavigation(poi: PoiItemV2) {
+        try {
+            val endPoint = com.amap.api.maps.model.Poi(
+                poi.title,
+                com.amap.api.maps.model.LatLng(poi.latLonPoint.latitude, poi.latLonPoint.longitude),
+                poi.poiId
+            )
+            val params = AmapNaviParams(null, null, endPoint, AmapNaviType.DRIVER, AmapPageType.ROUTE)
+            params.setUseInnerVoice(true)
+            
+            AmapNaviPage.getInstance().showRouteActivity(
+                context.applicationContext,
+                params,
+                object : INaviInfoCallback {
+                    override fun onInitNaviFailure() {
+                        Toast.makeText(context, "导航初始化失败", Toast.LENGTH_SHORT).show()
+                    }
+                    
+                    override fun onGetNavigationText(text: String?) {
+                        text?.let { naviInfo = it }
+                    }
+                    
+                    override fun onLocationChange(location: AMapNaviLocation?) {}
+                    override fun onArriveDestination(success: Boolean) {
+                        if (success) {
+                            Toast.makeText(context, "已到达目的地", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    override fun onStartNavi(type: Int) {}
+                    override fun onCalculateRouteSuccess(ints: IntArray?) {}
+                    override fun onCalculateRouteFailure(errorCode: Int) {
+                        Toast.makeText(context, "路线计算失败: $errorCode", Toast.LENGTH_SHORT).show()
+                    }
+                    override fun onStopSpeaking() {}
+                    override fun onReCalculateRoute(type: Int) {}
+                    override fun onExitPage(type: Int) {}
+                    override fun onStrategyChanged(strategy: Int) {}
+                    override fun onArrivedWayPoint(wayPointIndex: Int) {}
+                    override fun getCustomNaviBottomView(): android.view.View? = null
+                    override fun getCustomNaviView(): android.view.View? = null
+                    override fun onMapTypeChanged(mapType: Int) {}
+                    override fun getCustomMiddleView(): android.view.View? = null
+                    override fun onNaviDirectionChanged(naviMode: Int) {}
+                    override fun onDayAndNightModeChanged(mode: Int) {}
+                    override fun onBroadcastModeChanged(mode: Int) {}
+                    override fun onScaleAutoChanged(enable: Boolean) {}
+                }
+            )
+            
+            // 在地图上添加标记
+            aMap?.let { map ->
+                map.clear()
+                map.addMarker(
+                    MarkerOptions()
+                        .position(LatLng(poi.latLonPoint.latitude, poi.latLonPoint.longitude))
+                        .title(poi.title)
+                        .snippet(poi.snippet)
+                )
+                map.moveCamera(CameraUpdateFactory.newLatLngZoom(
+                    LatLng(poi.latLonPoint.latitude, poi.latLonPoint.longitude), 15f
+                ))
+            }
+            
+            showSearchResults = false
+            naviInfo = "正在导航至: ${poi.title}"
+        } catch (e: Exception) {
+            Toast.makeText(context, "启动导航失败: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+    
+    // 地图生命周期管理
+    DisposableEffect(Unit) {
+        onDispose {
+            try {
+                mapView?.onDestroy()
+            } catch (e: Exception) {
+                Log.e("MapSection", "Error disposing map", e)
+            }
+        }
+    }
+    
     Box(
-        modifier = modifier.border(2.dp, Color.Blue.copy(alpha = 0.3f), RoundedCornerShape(12.dp)).background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(12.dp)).padding(16.dp),
+        modifier = modifier
+            .border(2.dp, Color.Blue.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+            .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(12.dp)),
         contentAlignment = Alignment.Center
     ) {
-        Text(text = "地图区域", color = Color.Blue, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        // 高德地图View
+        AndroidView(
+            factory = { ctx ->
+                MapView(ctx).apply {
+                    onCreate(null)
+                    mapView = this
+                    map?.let { map ->
+                        aMap = map
+                        // 设置地图属性
+                        map.mapType = AMap.MAP_TYPE_NORMAL
+                        map.isTrafficEnabled = true // 显示实时交通
+                        map.isTouchPoiEnable = true
+
+
+                        // 设置定位样式 - 定位后自动移动到当前位置
+                        val myLocationStyle = MyLocationStyle()
+                        myLocationStyle.myLocationType(MyLocationStyle.LOCATION_TYPE_LOCATION_ROTATE) // 定位一次，且将视角移动到地图中心点
+                        map.myLocationStyle = myLocationStyle
+                        map.isMyLocationEnabled = true
+
+                                                
+                        // 设置地图默认缩放级别为最大（20级）
+                        map.moveCamera(CameraUpdateFactory.zoomTo(15f))
+
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+        
+        // 搜索框 - 右上角
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(12.dp)
+                .widthIn(max = 400.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color.White, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                androidx.compose.material3.TextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("搜索目的地", fontSize = 14.sp) },
+                    singleLine = true,
+                    colors = androidx.compose.material3.TextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        disabledContainerColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent
+                    ),
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp)
+                )
+                
+                if (searchQuery.isNotEmpty()) {
+                    Text(
+                        text = "清除",
+                        color = Color.Gray,
+                        fontSize = 14.sp,
+                        modifier = Modifier
+                            .padding(horizontal = 8.dp)
+                            .clickable {
+                                searchQuery = ""
+                                searchResults = emptyList()
+                                showSearchResults = false
+                            }
+                    )
+                }
+                
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(Color.Blue)
+                        .clickable { performSearch(searchQuery) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isSearching) {
+                        Text("…", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    } else {
+                        Text("🔍", color = Color.White, fontSize = 16.sp)
+                    }
+                }
+            }
+            
+            // 搜索结果列表
+            if (showSearchResults && searchResults.isNotEmpty()) {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 300.dp)
+                        .background(Color.White, RoundedCornerShape(8.dp))
+                        .padding(vertical = 4.dp)
+                ) {
+                    items(searchResults) { poi ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    startNavigation(poi)
+                                }
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Text(
+                                text = poi.title,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.Black
+                            )
+                            Text(
+                                text = poi.snippet ?: "",
+                                fontSize = 12.sp,
+                                color = Color.Gray,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        if (searchResults.last() != poi) {
+                            androidx.compose.material3.HorizontalDivider(
+                                modifier = Modifier.padding(horizontal = 12.dp),
+                                thickness = 0.5.dp,
+                                color = Color.LightGray
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 导航信息显示层
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .background(Color.Black.copy(alpha = 0.6f))
+                .padding(12.dp)
+        ) {
+            Text(
+                text = naviInfo,
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
     }
 }
 
@@ -791,6 +1144,15 @@ fun formatDuration(durationMs: Long): String {
     val minutes = totalSeconds / 60
     val seconds = totalSeconds % 60
     return "%d:%02d".format(minutes, seconds)
+}
+
+// 格式化距离（米转公里或米）
+fun formatDistance(distanceInMeters: Int): String {
+    return if (distanceInMeters >= 1000) {
+        "%.1f公里".format(distanceInMeters / 1000.0)
+    } else {
+        "${distanceInMeters}米"
+    }
 }
 
 @Preview(showBackground = true, widthDp = 1280, heightDp = 720)
