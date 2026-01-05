@@ -77,6 +77,8 @@ import com.amap.api.maps.model.LatLng
 import com.amap.api.maps.model.MarkerOptions
 import com.amap.api.maps.model.MyLocationStyle
 import com.amap.api.navi.AMapNavi
+import com.amap.api.navi.AMapNaviView
+import com.amap.api.navi.AimlessModeListener
 import com.amap.api.navi.AmapNaviPage
 import com.amap.api.navi.AmapNaviParams
 import com.amap.api.navi.AmapNaviType
@@ -84,6 +86,9 @@ import com.amap.api.navi.AmapPageType
 import com.amap.api.navi.INaviInfoCallback
 import com.amap.api.navi.NaviSetting
 import com.amap.api.navi.model.AMapNaviLocation
+import com.amap.api.navi.model.AMapNaviTrafficFacilityInfo
+import com.amap.api.navi.model.AimLessModeCongestionInfo
+import com.amap.api.navi.model.AimLessModeStat
 import com.amap.api.navi.model.NaviLatLng
 import com.amap.api.services.core.PoiItemV2
 import com.amap.api.services.poisearch.PoiResultV2
@@ -98,15 +103,30 @@ import java.util.Calendar
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
+    private var mAMapNavi: AMapNavi? = null
+    private var isCruiseModeActive = false
+    // 标记MapView是否已初始化完成
+    private var isMapViewReady = false
+    // 标记是否有定位权限
+    private var hasLocationPermission = false
+    // 导航状态回调
+    private var navigationCallback: ((NavigationEvent) -> Unit)? = null
+    
     private val locationPermissionRequest = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         when {
             permissions[android.Manifest.permission.ACCESS_FINE_LOCATION] == true -> {
                 Toast.makeText(this, "定位权限已授予", Toast.LENGTH_SHORT).show()
+                hasLocationPermission = true
+                // 权限授予后，如果地图已就绪则启动巡航
+                tryStartCruiseMode()
             }
             permissions[android.Manifest.permission.ACCESS_COARSE_LOCATION] == true -> {
                 Toast.makeText(this, "定位权限已授予", Toast.LENGTH_SHORT).show()
+                hasLocationPermission = true
+                // 权限授予后，如果地图已就绪则启动巡航
+                tryStartCruiseMode()
             }
             else -> {
                 Toast.makeText(this, "定位权限被拒绝，地图功能受限", Toast.LENGTH_LONG).show()
@@ -122,6 +142,10 @@ class MainActivity : ComponentActivity() {
         // 高德地图SDK隐私合规设置 - 必须在SDK任何接口调用之前设置
         MapsInitializer.updatePrivacyShow(this, true, true)
         MapsInitializer.updatePrivacyAgree(this, true)
+        
+        // 高德导航SDK隐私合规设置
+        NaviSetting.updatePrivacyShow(this, true, true)
+        NaviSetting.updatePrivacyAgree(this, true)
 
         // 屏幕常亮
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -134,6 +158,9 @@ class MainActivity : ComponentActivity() {
         }
         
         enableEdgeToEdge()
+        
+        // 初始化高德导航实例
+        initAMapNavi()
         
         // 请求定位权限
         checkAndRequestPermissions()
@@ -157,9 +184,157 @@ class MainActivity : ComponentActivity() {
         
         if (permissionsToRequest.isNotEmpty()) {
             locationPermissionRequest.launch(permissionsToRequest.toTypedArray())
+        } else {
+            // 如果权限已经授予，标记权限状态
+            hasLocationPermission = true
+            // 如果地图已就绪则启动巡航
+            tryStartCruiseMode()
+        }
+    }
+    
+    /**
+     * 初始化高德导航实例
+     */
+    private fun initAMapNavi() {
+        try {
+            mAMapNavi = AMapNavi.getInstance(applicationContext)
+            
+            // 添加巡航模式监听器
+            mAMapNavi?.addAimlessModeListener(object : AimlessModeListener {
+                override fun onUpdateTrafficFacility(infos: Array<out AMapNaviTrafficFacilityInfo>?) {
+                    Log.d("CruiseMode", "道路设施信息更新: ${infos?.size ?: 0}")
+                }
+                
+                override fun onUpdateAimlessModeElecCameraInfo(cameraInfo: Array<out AMapNaviTrafficFacilityInfo>?) {
+                    Log.d("CruiseMode", "电子眼信息更新: ${cameraInfo?.size ?: 0}")
+                }
+                
+                override fun updateAimlessModeStatistics(aimLessModeStat: AimLessModeStat?) {
+                    Log.d("CruiseMode", "统计信息更新: ${aimLessModeStat?.toString()}")
+                }
+                
+                override fun updateAimlessModeCongestionInfo(aimLessModeCongestionInfo: AimLessModeCongestionInfo?) {
+                    Log.d("CruiseMode", "拥堵信息更新: ${aimLessModeCongestionInfo?.toString()}")
+                }
+            })
+        } catch (e: Exception) {
+            Log.e("CruiseMode", "初始化导航失败", e)
+            Toast.makeText(this, "初始化导航失败: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+    
+    /**
+     * 尝试启动智能巡航模式（需要MapView和权限都就绪）
+     */
+    private fun tryStartCruiseMode() {
+        if (hasLocationPermission && isMapViewReady) {
+            startCruiseMode()
+        } else {
+            Log.d("CruiseMode", "等待条件满足 - 权限: $hasLocationPermission, 地图: $isMapViewReady")
+        }
+    }
+    
+    /**
+     * 启动智能巡航模式
+     */
+    private fun startCruiseMode() {
+        try {
+            if (isCruiseModeActive) {
+                Log.d("CruiseMode", "巡航模式已启动，无需重复启动")
+                return
+            }
+
+            mAMapNavi?.let { navi ->
+                // 参数说明：
+                // 1: 只播报电子眼
+                // 2: 只播报特殊路段
+                // 3: 播报电子眼和特殊路段
+                navi.startAimlessMode(3)
+                isCruiseModeActive = true
+                Toast.makeText(this, "智能巡航已开启", Toast.LENGTH_SHORT).show()
+                Log.d("CruiseMode", "智能巡航模式已启动")
+            } ?: run {
+                Toast.makeText(this, "导航实例未初始化", Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: Exception) {
+            Log.e("CruiseMode", "启动巡航模式失败", e)
+            Toast.makeText(this, "启动巡航模式失败: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+    
+    /**
+     * 当MapView初始化完成时调用
+     */
+    fun onMapViewReady() {
+        isMapViewReady = true
+        Log.d("CruiseMode", "MapView已就绪")
+        // 地图就绪后，如果有权限则启动巡航
+        tryStartCruiseMode()
+    }
+    
+    /**
+     * 停止智能巡航模式
+     */
+    private fun stopCruiseMode() {
+        try {
+            if (!isCruiseModeActive) {
+                return
+            }
+            
+            mAMapNavi?.stopAimlessMode()
+            isCruiseModeActive = false
+            Log.d("CruiseMode", "智能巡航模式已停止")
+        } catch (e: Exception) {
+            Log.e("CruiseMode", "停止巡航模式失败", e)
+            Toast.makeText(this, "停止巡航模式失败: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+    
+    /**
+     * 设置导航事件回调
+     */
+    fun setNavigationCallback(callback: (NavigationEvent) -> Unit) {
+        navigationCallback = callback
+    }
+    
+    /**
+     * 触发导航事件
+     */
+    fun triggerNavigationEvent(event: NavigationEvent) {
+        navigationCallback?.invoke(event)
+    }
+    
+    override fun onDestroy() {
+        super.onDestroy()
+        // 销毁时停止巡航模式
+        try {
+            stopCruiseMode()
+            // 销毁导航实例（静态方法，释放所有资源）
+            AMapNavi.destroy()
+        } catch (e: Exception) {
+            Log.e("CruiseMode", "销毁导航实例失败", e)
         }
     }
 }
+
+/**
+ * 导航事件类型
+ */
+sealed class NavigationEvent {
+    data object ArriveDestination : NavigationEvent()
+    data object StopNavigation : NavigationEvent()
+}
+
+/**
+ * 路线信息
+ */
+data class RoutePathInfo(
+    val routeId: Int,
+    val length: Int, // 总里程（米）
+    val time: Int, // 预计时间（秒）
+    val tollCost: Int, // 过路费（元）
+    val strategyName: String // 路线名称
+)
 
 @Composable
 fun HomeScreen() {
@@ -334,6 +509,7 @@ fun ContentArea(modifier: Modifier = Modifier) {
 @Composable
 fun MapSection(modifier: Modifier = Modifier) {
     val context = LocalContext.current
+    val mainActivity = context as? MainActivity
     var mapView by remember { mutableStateOf<MapView?>(null) }
     var aMap by remember { mutableStateOf<AMap?>(null) }
     var naviInfo by remember { mutableStateOf("点击地图开始导航") }
@@ -342,9 +518,6 @@ fun MapSection(modifier: Modifier = Modifier) {
     var showSearchResults by remember { mutableStateOf(false) }
     var isSearching by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
-
-    NaviSetting.updatePrivacyShow(context, true, true)
-    NaviSetting.updatePrivacyAgree(context, true)
     
     // 搜索功能
     fun performSearch(keyword: String) {
@@ -387,14 +560,26 @@ fun MapSection(modifier: Modifier = Modifier) {
         }
     }
     
-    // 开始导航到指定位置
+    // 开始导航到指定位置 - 使用高德内置导航页面
     fun startNavigation(poi: PoiItemV2) {
         try {
+            // 停止巡航模式
+            mainActivity?.let { activity ->
+                try {
+                    val stopMethod = MainActivity::class.java.getDeclaredMethod("stopCruiseMode")
+                    stopMethod.isAccessible = true
+                    stopMethod.invoke(activity)
+                } catch (e: Exception) {
+                    Log.e("MapSection", "停止巡航失败", e)
+                }
+            }
+            
             val endPoint = com.amap.api.maps.model.Poi(
                 poi.title,
-                com.amap.api.maps.model.LatLng(poi.latLonPoint.latitude, poi.latLonPoint.longitude),
+                LatLng(poi.latLonPoint.latitude, poi.latLonPoint.longitude),
                 poi.poiId
             )
+            
             val params = AmapNaviParams(null, null, endPoint, AmapNaviType.DRIVER, AmapPageType.ROUTE)
             params.setUseInnerVoice(true)
             
@@ -415,15 +600,24 @@ fun MapSection(modifier: Modifier = Modifier) {
                         if (success) {
                             Toast.makeText(context, "已到达目的地", Toast.LENGTH_SHORT).show()
                         }
+                        // 到达目的地后恢复巡航
+                        mainActivity?.triggerNavigationEvent(NavigationEvent.ArriveDestination)
                     }
-                    override fun onStartNavi(type: Int) {}
-                    override fun onCalculateRouteSuccess(ints: IntArray?) {}
+                    override fun onStartNavi(type: Int) {
+                        naviInfo = "导航中..."
+                    }
+                    override fun onCalculateRouteSuccess(ints: IntArray?) {
+                        naviInfo = "算路成功"
+                    }
                     override fun onCalculateRouteFailure(errorCode: Int) {
                         Toast.makeText(context, "路线计算失败: $errorCode", Toast.LENGTH_SHORT).show()
                     }
                     override fun onStopSpeaking() {}
                     override fun onReCalculateRoute(type: Int) {}
-                    override fun onExitPage(type: Int) {}
+                    override fun onExitPage(type: Int) {
+                        // 退出导航页面后恢复巡航
+                        mainActivity?.triggerNavigationEvent(NavigationEvent.StopNavigation)
+                    }
                     override fun onStrategyChanged(strategy: Int) {}
                     override fun onArrivedWayPoint(wayPointIndex: Int) {}
                     override fun getCustomNaviBottomView(): android.view.View? = null
@@ -454,7 +648,32 @@ fun MapSection(modifier: Modifier = Modifier) {
             showSearchResults = false
             naviInfo = "正在导航至: ${poi.title}"
         } catch (e: Exception) {
+            Log.e("MapSection", "启动导航失败", e)
             Toast.makeText(context, "启动导航失败: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+    
+    // 监听导航事件，恢复巡航
+    LaunchedEffect(Unit) {
+        mainActivity?.setNavigationCallback { event ->
+            when (event) {
+                NavigationEvent.ArriveDestination, NavigationEvent.StopNavigation -> {
+                    // 停止导航，恢复巡航
+                    coroutineScope.launch {
+                        kotlinx.coroutines.delay(500) // 稍微延迟以确保导航完全停止
+                        mainActivity.let { activity ->
+                            try {
+                                val startMethod = MainActivity::class.java.getDeclaredMethod("tryStartCruiseMode")
+                                startMethod.isAccessible = true
+                                startMethod.invoke(activity)
+                            } catch (e: Exception) {
+                                Log.e("MapSection", "恢复巡航失败", e)
+                            }
+                        }
+                        naviInfo = "已恢复巡航模式"
+                    }
+                }
+            }
         }
     }
     
@@ -484,29 +703,25 @@ fun MapSection(modifier: Modifier = Modifier) {
                     mapView = this
                     map?.let { map ->
                         aMap = map
-                        // 设置地图属性
                         map.mapType = AMap.MAP_TYPE_NORMAL
-                        map.isTrafficEnabled = true // 显示实时交通
+                        map.isTrafficEnabled = true
                         map.isTouchPoiEnable = true
 
-
-                        // 设置定位样式 - 定位后自动移动到当前位置
                         val myLocationStyle = MyLocationStyle()
-                        myLocationStyle.myLocationType(MyLocationStyle.LOCATION_TYPE_LOCATION_ROTATE) // 定位一次，且将视角移动到地图中心点
+                        myLocationStyle.myLocationType(MyLocationStyle.LOCATION_TYPE_LOCATION_ROTATE)
                         map.myLocationStyle = myLocationStyle
                         map.isMyLocationEnabled = true
-
-                                                
-                        // 设置地图默认缩放级别为最大（20级）
                         map.moveCamera(CameraUpdateFactory.zoomTo(15f))
-
+                        
+                        (context as? MainActivity)?.onMapViewReady()
+                        Log.d("MapSection", "地图初始化完成")
                     }
                 }
             },
             modifier = Modifier.fillMaxSize()
         )
         
-        // 搜索框 - 右上角
+        // 搜索框
         Column(
             modifier = Modifier
                 .align(Alignment.TopStart)
@@ -580,9 +795,7 @@ fun MapSection(modifier: Modifier = Modifier) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable {
-                                    startNavigation(poi)
-                                }
+                                .clickable { startNavigation(poi) }
                                 .padding(horizontal = 12.dp, vertical = 8.dp)
                         ) {
                             Text(
@@ -1152,6 +1365,78 @@ fun formatDistance(distanceInMeters: Int): String {
         "%.1f公里".format(distanceInMeters / 1000.0)
     } else {
         "${distanceInMeters}米"
+    }
+}
+
+// 格式化时间（秒转小时分钟）
+fun formatTime(timeInSeconds: Int): String {
+    val hours = timeInSeconds / 3600
+    val minutes = (timeInSeconds % 3600) / 60
+    return when {
+        hours > 0 -> "${hours}小时${minutes}分钟"
+        else -> "${minutes}分钟"
+    }
+}
+
+/**
+ * 路线信息项组件
+ */
+@Composable
+fun RoutePathItem(
+    routeInfo: RoutePathInfo,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFFF5F5F5), RoundedCornerShape(8.dp))
+            .clickable { onClick() }
+            .padding(16.dp)
+    ) {
+        Column {
+            Text(
+                text = routeInfo.strategyName,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.Black
+            )
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text(
+                        text = "距离: ${formatDistance(routeInfo.length)}",
+                        fontSize = 14.sp,
+                        color = Color.Gray
+                    )
+                    Text(
+                        text = "预计时间: ${formatTime(routeInfo.time)}",
+                        fontSize = 14.sp,
+                        color = Color.Gray
+                    )
+                }
+                
+                if (routeInfo.tollCost > 0) {
+                    Text(
+                        text = "过路费: ¥${routeInfo.tollCost}",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFFF6B00)
+                    )
+                } else {
+                    Text(
+                        text = "免过路费",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF00B578)
+                    )
+                }
+            }
+        }
     }
 }
 

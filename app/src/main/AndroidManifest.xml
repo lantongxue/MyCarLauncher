@@ -15,6 +15,7 @@
     <uses-permission android:name="android.permission.ACCESS_LOCATION_EXTRA_COMMANDS" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <queries>
         <intent>
@@ -36,7 +37,7 @@
         <!-- 高德地图API Key -->
         <meta-data
             android:name="com.amap.api.v2.apikey"
-            android:value="xxxxx" />
+            android:value="cd22e73b425f4dbb7d2ae5d6700a2ac1" />
         
         <!-- 高德导航组件Activity -->
         <activity
