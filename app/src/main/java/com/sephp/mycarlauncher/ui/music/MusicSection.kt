@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sephp.mycarlauncher.R
 import com.sephp.mycarlauncher.data.model.MusicState
+import com.sephp.mycarlauncher.service.LyricService
 import com.sephp.mycarlauncher.service.MusicNotificationListener
 import com.sephp.mycarlauncher.ui.components.MusicControlButton
 import com.sephp.mycarlauncher.utils.FormatUtils
@@ -80,14 +81,16 @@ fun MusicSection(modifier: Modifier = Modifier) {
         
         val metadata = mediaController.metadata
         val playbackState = mediaController.playbackState
-        
-        val newTitle = metadata?.getString("android.media.metadata.CUSTOM_FIELD_TITLE") ?: "未知曲目"
-        val singer = metadata?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE) ?: "未知歌手"
-        val artist = metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: "未知艺术家"
+
         val isPlaying = playbackState?.state == PlaybackState.STATE_PLAYING
-        val totalDuration = metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
-        val currentLyricLine = metadata?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE) ?: "-"
         
+        val newTitle = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE) ?: "未知曲目"
+        val artist = metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: "未知艺术家"
+        val totalDuration = metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
+        val lyricLines = metadata?.getString("ucar.media.metadata.LYRICS_WHOLE") ?: "-"
+
+
+
         // 处理播放位置的三种情况
         val isFirstLoad = musicState.title == "未在播放" // APP刚打开，首次加载
         val isSongChanged = newTitle != musicState.title && !isFirstLoad // 切换歌曲
@@ -98,13 +101,25 @@ fun MusicSection(modifier: Modifier = Modifier) {
             else -> musicState.currentPosition // 其他情况保持当前位置
         }
 
+        // 只在歌词内容变化时才重新解析，提升性能
+        val isLyricChanged = lyricLines != musicState.lyricLines
+        val parsedLyrics = if (isLyricChanged) {
+            LyricService.parseLrc(lyricLines)
+        } else {
+            musicState.parsedLyrics
+        }
+        
+        // 获取当前歌词
+        val currentLyric = LyricService.getCurrentLyric(parsedLyrics, newPosition)
+        
         // 更新音乐状态信息
         musicState = musicState.copy(
             title = newTitle,
-            singer = singer,
             artist = artist,
             isPlaying = isPlaying,
-            currentLyricLine = currentLyricLine,
+            lyricLines = lyricLines,
+            parsedLyrics = parsedLyrics,
+            currentLyricLine = currentLyric,
             currentPosition = newPosition,
             totalDuration = totalDuration
         )
@@ -202,7 +217,12 @@ fun MusicSection(modifier: Modifier = Modifier) {
                 }
             }
             
-            musicState = musicState.copy(currentPosition = newPosition)
+            // 更新播放位置和当前歌词
+            val currentLyric = LyricService.getCurrentLyric(musicState.parsedLyrics, newPosition)
+            musicState = musicState.copy(
+                currentPosition = newPosition,
+                currentLyricLine = currentLyric
+            )
         }
     }
 
@@ -258,7 +278,7 @@ fun MusicSection(modifier: Modifier = Modifier) {
                     textAlign = TextAlign.Center
                 )
                 Text(
-                    text = musicState.singer,
+                    text = musicState.artist,
                     color = Color.White,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,

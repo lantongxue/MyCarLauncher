@@ -75,7 +75,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         setTheme(R.style.Theme_MyCarLauncher)
         super.onCreate(savedInstanceState)
-        
+
+        // 默认同意高德隐私条款
         MapsInitializer.updatePrivacyShow(this, true, true)
         MapsInitializer.updatePrivacyAgree(this, true)
         NaviSetting.updatePrivacyShow(this, true, true)
@@ -204,7 +205,7 @@ class MainActivity : ComponentActivity() {
                 override fun onGpsSignalWeak(weak: Boolean) {}
             })
             
-            mAMapNavi?.setUseInnerVoice(true)
+            mAMapNavi?.setUseInnerVoice(true, true)
         } catch (e: Exception) {
             Log.e("CruiseMode", "初始化导航失败", e)
             Toast.makeText(this, "初始化导航失败: ${e.message}", Toast.LENGTH_SHORT).show()
